@@ -14,6 +14,8 @@ class GameViewController: NSViewController {
     var renderer: Renderer!
     var mtkView: MTKView!
 
+    private var keysHeld = Set<UInt16>()
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -41,4 +43,18 @@ class GameViewController: NSViewController {
 
         mtkView.delegate = renderer
     }
+
+    // REPLACE: keyDown / keyUp to update set & forward to renderer
+    override func keyDown(with event: NSEvent) {
+        keysHeld.insert(event.keyCode)
+        renderer.keysHeld = keysHeld          // forward
+    }
+
+    override func keyUp(with event: NSEvent) {
+        keysHeld.remove(event.keyCode)
+        renderer.keysHeld = keysHeld
+    }
+
+    // override first-responder (already present or add if missing)
+    override var acceptsFirstResponder: Bool { true }
 }

@@ -1,327 +1,211 @@
 //
 //  Renderer.swift
-//  Physics
-//
-//  Created by Yousef Jawdat on 15/05/2025.
+//  Physics – minimal 2-D playground
 //
 
-// Our platform independent renderer class
-
-import Metal
 import MetalKit
 import simd
 
-// The 256 byte aligned size of our uniform structure
-let alignedUniformsSize = (MemoryLayout<Uniforms>.size + 0xFF) & -0x100
-
-let maxBuffersInFlight = 3
-
-enum RendererError: Error {
-    case badVertexDescriptor
+// MARK: ‑ Shared types
+private struct SimpleVertex {
+    var position : SIMD3<Float>
+    var texcoord : SIMD2<Float>
 }
 
-class Renderer: NSObject, MTKViewDelegate {
+private struct Uniforms {
+    var projectionMatrix : matrix_float4x4
+    var modelViewMatrix  : matrix_float4x4
+}
 
-    public let device: MTLDevice
-    let commandQueue: MTLCommandQueue
-    var dynamicUniformBuffer: MTLBuffer
-    var pipelineState: MTLRenderPipelineState
-    var depthState: MTLDepthStencilState
-    var colorMap: MTLTexture
+// MARK: ‑ Renderer
+final class Renderer: NSObject, MTKViewDelegate {
 
-    let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
+    // ── Metal objects ──────────────────────────────────────────────
+    private let device       : MTLDevice
+    private let queue        : MTLCommandQueue
+    private let pipeline     : MTLRenderPipelineState
 
-    var uniformBufferOffset = 0
+    // Buffers
+    private let playerVB     : MTLBuffer
+    private let groundVB     : MTLBuffer
 
-    var uniformBufferIndex = 0
+    // Textures (flat colours)
+    private let whiteTex     : MTLTexture
+    private let yellowTex    : MTLTexture
 
-    var uniforms: UnsafeMutablePointer<Uniforms>
+    // ── Input / physics state ─────────────────────────────────────
+    var   keysHeld           = Set<UInt16>()          // updated by view-controller
+    private var lastTime : CFTimeInterval = 0
 
-    var projectionMatrix: matrix_float4x4 = matrix_float4x4()
+    private let groundY   : Float = -8.9         // top edge of the ground quad near bottom of view.
+    private let playerHalfHeight : Float = 0.5  // half of the 1‑unit player height.
+    private var playerPos = SIMD2<Float>(0, -8.9 + 0.5)
+    private var playerVel = SIMD2<Float>(0, 0)
 
-    var rotation: Float = 0
+    private let moveSpeed : Float = 4          // m·s⁻¹
+    private let jumpImpulse: Float = 4.5
+    private let gravity   : Float = -9.8
 
-    var mesh: MTKMesh
+    // MARK: ‑ Init
+    init?(metalKitView view: MTKView) {
+        guard let dev = view.device ?? MTLCreateSystemDefaultDevice() else { return nil }
+        device = dev
+        queue  = device.makeCommandQueue()!
 
-    @MainActor
-    init?(metalKitView: MTKView) {
-        self.device = metalKitView.device!
-        self.commandQueue = self.device.makeCommandQueue()!
+        // Pipeline (simple colour pass)
+        let lib   = device.makeDefaultLibrary()!
+        let vDesc: MTLVertexDescriptor = {
+            let vd = MTLVertexDescriptor()
+            // position ─ float3 @ offset 0, buffer 0
+            vd.attributes[0].format      = .float3
+            vd.attributes[0].offset      = 0
+            vd.attributes[0].bufferIndex = 0
+            // texcoord ─ float2 @ offset 12, buffer 0
+            vd.attributes[1].format      = .float2
+            vd.attributes[1].offset      = 12
+            vd.attributes[1].bufferIndex = 0
+            // single interleaved layout
+            vd.layouts[0].stride         = MemoryLayout<SimpleVertex>.stride   // 20 bytes
+            vd.layouts[0].stepFunction   = .perVertex
+            return vd
+        }()
 
-        let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
+        let desc  = MTLRenderPipelineDescriptor()
+        desc.vertexFunction   = lib.makeFunction(name: "vertexShader")
+        desc.fragmentFunction = lib.makeFunction(name: "fragmentShader")
+        desc.colorAttachments[0].pixelFormat = view.colorPixelFormat
+        desc.vertexDescriptor  = vDesc
+        pipeline = try! device.makeRenderPipelineState(descriptor: desc)
 
-        self.dynamicUniformBuffer = self.device.makeBuffer(length:uniformBufferSize,
-                                                           options:[MTLResourceOptions.storageModeShared])!
-
-        self.dynamicUniformBuffer.label = "UniformBuffer"
-
-        uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to:Uniforms.self, capacity:1)
-
-        metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float_stencil8
-        metalKitView.colorPixelFormat = MTLPixelFormat.bgra8Unorm_srgb
-        metalKitView.sampleCount = 1
-
-        let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
-
-        do {
-            pipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
-                                                                       metalKitView: metalKitView,
-                                                                       mtlVertexDescriptor: mtlVertexDescriptor)
-        } catch {
-            print("Unable to compile render pipeline state.  Error info: \(error)")
-            return nil
+        // Quad helpers
+        func makeQuad(width: Float, height: Float) -> [SimpleVertex] {
+            let hw = width  * 0.5, hh = height * 0.5
+            return [
+                .init(position:[-hw,-hh,0], texcoord:[0,1]),
+                .init(position:[ hw,-hh,0], texcoord:[1,1]),
+                .init(position:[-hw, hh,0], texcoord:[0,0]),
+                .init(position:[ hw, hh,0], texcoord:[1,0])
+            ]
         }
 
-        let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
-        depthStateDescriptor.isDepthWriteEnabled = true
-        self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
+        // Player (0.5×1.0 units)
+        let pVerts  = makeQuad(width: 0.5, height: 1.0)
+        playerVB    = device.makeBuffer(bytes: pVerts,
+                                        length: MemoryLayout<SimpleVertex>.stride*4)!
 
-        do {
-            mesh = try Renderer.buildMesh(device: device, mtlVertexDescriptor: mtlVertexDescriptor)
-        } catch {
-            print("Unable to build MetalKit Mesh. Error info: \(error)")
-            return nil
-        }
+        // Ground (span ±10, thickness 0.2)
+        let gVerts  = makeQuad(width: 20, height: 0.2)
+        groundVB    = device.makeBuffer(bytes: gVerts,
+                                        length: MemoryLayout<SimpleVertex>.stride*4)!
 
-        do {
-            colorMap = try Renderer.loadTexture(device: device, textureName: "ColorMap")
-        } catch {
-            print("Unable to load texture. Error info: \(error)")
-            return nil
-        }
+        // Flat-colour textures
+        whiteTex  = Renderer.makeSolidTexture(device: device, rgba: 0xFFFFFFFF)
+        yellowTex = Renderer.makeSolidTexture(device: device, rgba: 0xFFFF00FF)
 
         super.init()
-
     }
 
-    class func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
-        // Create a Metal vertex descriptor specifying how vertices will by laid out for input into our render
-        //   pipeline and how we'll layout our Model IO vertices
-
-        let mtlVertexDescriptor = MTLVertexDescriptor()
-
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].format = MTLVertexFormat.float3
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].offset = 0
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].bufferIndex = BufferIndex.meshPositions.rawValue
-
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].format = MTLVertexFormat.float2
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].offset = 0
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].bufferIndex = BufferIndex.meshGenerics.rawValue
-
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stride = 12
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stepRate = 1
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stepFunction = MTLVertexStepFunction.perVertex
-
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stepRate = 1
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stepFunction = MTLVertexStepFunction.perVertex
-
-        return mtlVertexDescriptor
-    }
-
-    @MainActor
-    class func buildRenderPipelineWithDevice(device: MTLDevice,
-                                             metalKitView: MTKView,
-                                             mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
-        /// Build a render state pipeline object
-
-        let library = device.makeDefaultLibrary()
-
-        let vertexFunction = library?.makeFunction(name: "vertexShader")
-        let fragmentFunction = library?.makeFunction(name: "fragmentShader")
-
-        let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "RenderPipeline"
-        pipelineDescriptor.rasterSampleCount = metalKitView.sampleCount
-        pipelineDescriptor.vertexFunction = vertexFunction
-        pipelineDescriptor.fragmentFunction = fragmentFunction
-        pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
-
-        pipelineDescriptor.colorAttachments[0].pixelFormat = metalKitView.colorPixelFormat
-        pipelineDescriptor.depthAttachmentPixelFormat = metalKitView.depthStencilPixelFormat
-        pipelineDescriptor.stencilAttachmentPixelFormat = metalKitView.depthStencilPixelFormat
-
-        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-    }
-
-    class func buildMesh(device: MTLDevice,
-                         mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTKMesh {
-        /// Create and condition mesh data to feed into a pipeline using the given vertex descriptor
-
-        let metalAllocator = MTKMeshBufferAllocator(device: device)
-
-        let mdlMesh = MDLMesh.newBox(withDimensions: SIMD3<Float>(4, 4, 4),
-                                     segments: SIMD3<UInt32>(2, 2, 2),
-                                     geometryType: MDLGeometryType.triangles,
-                                     inwardNormals:false,
-                                     allocator: metalAllocator)
-
-        let mdlVertexDescriptor = MTKModelIOVertexDescriptorFromMetal(mtlVertexDescriptor)
-
-        guard let attributes = mdlVertexDescriptor.attributes as? [MDLVertexAttribute] else {
-            throw RendererError.badVertexDescriptor
-        }
-        attributes[VertexAttribute.position.rawValue].name = MDLVertexAttributePosition
-        attributes[VertexAttribute.texcoord.rawValue].name = MDLVertexAttributeTextureCoordinate
-
-        mdlMesh.vertexDescriptor = mdlVertexDescriptor
-
-        return try MTKMesh(mesh:mdlMesh, device:device)
-    }
-
-    class func loadTexture(device: MTLDevice,
-                           textureName: String) throws -> MTLTexture {
-        /// Load texture data with optimal parameters for sampling
-
-        let textureLoader = MTKTextureLoader(device: device)
-
-        let textureLoaderOptions = [
-            MTKTextureLoader.Option.textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue),
-            MTKTextureLoader.Option.textureStorageMode: NSNumber(value: MTLStorageMode.`private`.rawValue)
-        ]
-
-        return try textureLoader.newTexture(name: textureName,
-                                            scaleFactor: 1.0,
-                                            bundle: nil,
-                                            options: textureLoaderOptions)
-
-    }
-
-    private func updateDynamicBufferState() {
-        /// Update the state of our uniform buffers before rendering
-
-        uniformBufferIndex = (uniformBufferIndex + 1) % maxBuffersInFlight
-
-        uniformBufferOffset = alignedUniformsSize * uniformBufferIndex
-
-        uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:Uniforms.self, capacity:1)
-    }
-
-    private func updateGameState() {
-        /// Update any game state before rendering
-
-        uniforms[0].projectionMatrix = projectionMatrix
-
-        let rotationAxis = SIMD3<Float>(1, 1, 0)
-        let modelMatrix = matrix4x4_rotation(radians: rotation, axis: rotationAxis)
-        let viewMatrix = matrix4x4_translation(0.0, 0.0, -8.0)
-        uniforms[0].modelViewMatrix = simd_mul(viewMatrix, modelMatrix)
-        rotation += 0.01
-    }
+    // MARK: ‑ MTKViewDelegate
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
 
     func draw(in view: MTKView) {
-        /// Per frame updates hare
+        // ‑- timing
+        let now = CACurrentMediaTime()
+        let dt  = lastTime == 0 ? 1/60.0 : now - lastTime
+        lastTime = now
 
-        _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
-        
-        if let commandBuffer = commandQueue.makeCommandBuffer() {
-            let semaphore = inFlightSemaphore
-            commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
-                semaphore.signal()
-            }
-            
-            self.updateDynamicBufferState()
-            
-            self.updateGameState()
-            
-            /// Delay getting the currentRenderPassDescriptor until we absolutely need it to avoid
-            ///   holding onto the drawable and blocking the display pipeline any longer than necessary
-            let renderPassDescriptor = view.currentRenderPassDescriptor
-            
-            if let renderPassDescriptor = renderPassDescriptor {
-                
-                /// Final pass rendering code here
-                if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
-                    renderEncoder.label = "Primary Render Encoder"
-                    
-                    renderEncoder.pushDebugGroup("Draw Box")
-                    
-                    renderEncoder.setCullMode(.back)
-                    
-                    renderEncoder.setFrontFacing(.counterClockwise)
-                    
-                    renderEncoder.setRenderPipelineState(pipelineState)
-                    
-                    renderEncoder.setDepthStencilState(depthState)
-                    
-                    renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-                    renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-                    
-                    for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
-                        guard let layout = element as? MDLVertexBufferLayout else {
-                            return
-                        }
-                        
-                        if layout.stride != 0 {
-                            let buffer = mesh.vertexBuffers[index]
-                            renderEncoder.setVertexBuffer(buffer.buffer, offset:buffer.offset, index: index)
-                        }
-                    }
-                    
-                    renderEncoder.setFragmentTexture(colorMap, index: TextureIndex.color.rawValue)
-                    
-                    for submesh in mesh.submeshes {
-                        renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
-                                                            indexCount: submesh.indexCount,
-                                                            indexType: submesh.indexType,
-                                                            indexBuffer: submesh.indexBuffer.buffer,
-                                                            indexBufferOffset: submesh.indexBuffer.offset)
-                        
-                    }
-                    
-                    renderEncoder.popDebugGroup()
-                    
-                    renderEncoder.endEncoding()
-                    
-                    if let drawable = view.currentDrawable {
-                        commandBuffer.present(drawable)
-                    }
-                }
-            }
-            
-            commandBuffer.commit()
+        updateGame(dt: Float(dt))
+
+        guard
+            let pass = view.currentRenderPassDescriptor,
+            let cmd  = queue.makeCommandBuffer(),
+            let enc  = cmd.makeRenderCommandEncoder(descriptor: pass),
+            let drawable = view.currentDrawable
+        else { return }
+
+        enc.setRenderPipelineState(pipeline)
+
+        // helper: produces orthographic projection (already constant)
+        let projScale : Float = 0.1
+        let proj = matrix_float4x4(diagonal: [projScale, projScale, 1, 1])
+
+        // ── draw ground ─────────────────────────────────────────
+        // translate ground quad so its centre sits at groundY - halfThickness (‑0.1)
+        let groundCentreY: Float = groundY - 0.1                  // thickness = 0.2
+        let gMV = matrix_float4x4(columns: (
+            SIMD4<Float>(1,0,0,0),
+            SIMD4<Float>(0,1,0,0),
+            SIMD4<Float>(0,0,1,0),
+            SIMD4<Float>(0, groundCentreY, 0, 1)
+        ))
+        var gUni = Uniforms(projectionMatrix: proj,
+                            modelViewMatrix: gMV)
+        enc.setVertexBytes(&gUni,
+                           length: MemoryLayout<Uniforms>.stride,
+                           index: 2)
+        enc.setVertexBuffer(groundVB, offset: 0, index: 0)
+        enc.setFragmentTexture(yellowTex, index: 0)
+        enc.drawPrimitives(type: MTLPrimitiveType.triangleStrip,
+                           vertexStart: 0,
+                           vertexCount: 4)
+
+        // ── draw player ────────────────────────────────────────
+        let pMV = matrix_float4x4(columns: (
+            SIMD4<Float>(1,0,0,0),
+            SIMD4<Float>(0,1,0,0),
+            SIMD4<Float>(0,0,1,0),
+            SIMD4<Float>(playerPos.x, playerPos.y, 0, 1)
+        ))
+        var pUni = Uniforms(projectionMatrix: proj, modelViewMatrix: pMV)
+        enc.setVertexBytes(&pUni,
+                           length: MemoryLayout<Uniforms>.stride,
+                           index: 2)
+        enc.setVertexBuffer(playerVB, offset: 0, index: 0)
+        enc.setFragmentTexture(whiteTex, index: 0)
+        enc.drawPrimitives(type: MTLPrimitiveType.triangleStrip,
+                           vertexStart: 0,
+                           vertexCount: 4)
+
+        enc.endEncoding()
+        cmd.present(drawable)
+        cmd.commit()
+    }
+
+    // MARK: ‑ Logic
+    private func updateGame(dt: Float) {
+        // input
+        var dx: Float = 0
+        if keysHeld.contains(0) { dx -= moveSpeed }   // ‘A’
+        if keysHeld.contains(2) { dx += moveSpeed }   // ‘D’
+        playerVel.x = dx
+
+        if keysHeld.contains(49) && playerPos.y - playerHalfHeight <= groundY + 0.0001 {
+            playerVel.y = jumpImpulse
+        }
+
+        // physics
+        playerVel.y += gravity * dt
+        playerPos   += playerVel * dt
+
+        if playerPos.y - playerHalfHeight < groundY {
+            playerPos.y  = groundY + playerHalfHeight
+            playerVel.y  = 0
         }
     }
+}
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        /// Respond to drawable size or orientation changes here
-
-        let aspect = Float(size.width) / Float(size.height)
-        projectionMatrix = matrix_perspective_right_hand(fovyRadians: radians_from_degrees(65), aspectRatio:aspect, nearZ: 0.1, farZ: 100.0)
+extension Renderer {
+    static func makeSolidTexture(device: MTLDevice, rgba: UInt32) -> MTLTexture {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,
+                                                            width: 1, height: 1,
+                                                            mipmapped: false)
+        desc.usage = .shaderRead
+        let tex = device.makeTexture(descriptor: desc)!
+        var px = rgba
+        tex.replace(region: MTLRegionMake2D(0, 0, 1, 1),
+                    mipmapLevel: 0,
+                    withBytes: &px,
+                    bytesPerRow: 4)
+        return tex
     }
-}
-
-// Generic matrix math utility functions
-func matrix4x4_rotation(radians: Float, axis: SIMD3<Float>) -> matrix_float4x4 {
-    let unitAxis = normalize(axis)
-    let ct = cosf(radians)
-    let st = sinf(radians)
-    let ci = 1 - ct
-    let x = unitAxis.x, y = unitAxis.y, z = unitAxis.z
-    return matrix_float4x4.init(columns:(vector_float4(    ct + x * x * ci, y * x * ci + z * st, z * x * ci - y * st, 0),
-                                         vector_float4(x * y * ci - z * st,     ct + y * y * ci, z * y * ci + x * st, 0),
-                                         vector_float4(x * z * ci + y * st, y * z * ci - x * st,     ct + z * z * ci, 0),
-                                         vector_float4(                  0,                   0,                   0, 1)))
-}
-
-func matrix4x4_translation(_ translationX: Float, _ translationY: Float, _ translationZ: Float) -> matrix_float4x4 {
-    return matrix_float4x4.init(columns:(vector_float4(1, 0, 0, 0),
-                                         vector_float4(0, 1, 0, 0),
-                                         vector_float4(0, 0, 1, 0),
-                                         vector_float4(translationX, translationY, translationZ, 1)))
-}
-
-func matrix_perspective_right_hand(fovyRadians fovy: Float, aspectRatio: Float, nearZ: Float, farZ: Float) -> matrix_float4x4 {
-    let ys = 1 / tanf(fovy * 0.5)
-    let xs = ys / aspectRatio
-    let zs = farZ / (nearZ - farZ)
-    return matrix_float4x4.init(columns:(vector_float4(xs,  0, 0,   0),
-                                         vector_float4( 0, ys, 0,   0),
-                                         vector_float4( 0,  0, zs, -1),
-                                         vector_float4( 0,  0, zs * nearZ, 0)))
-}
-
-func radians_from_degrees(_ degrees: Float) -> Float {
-    return (degrees / 180) * .pi
 }
