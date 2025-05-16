@@ -1,53 +1,21 @@
-//
-//  Shaders.metal
-//  Physics
-//
-//  Created by Yousef Jawdat on 15/05/2025.
-//
-
-// File for Metal kernel and shader functions
-
+//  Shaders.metal – solid-colour pass (no textures)
 #include <metal_stdlib>
 #include <simd/simd.h>
-
-// Including header shared between this Metal shader code and Swift/C code executing Metal API commands
 #import "ShaderTypes.h"
-
 using namespace metal;
 
-typedef struct
+struct VIn  { float3 pos [[attribute(0)]]; };
+struct VOut { float4 pos [[position]];    };
+
+vertex VOut vertexShader(VIn vin [[stage_in]],
+                         constant Uniforms& u [[buffer(2)]])
 {
-    float3 position [[attribute(VertexAttributePosition)]];
-    float2 texCoord [[attribute(VertexAttributeTexcoord)]];
-} Vertex;
-
-typedef struct
-{
-    float4 position [[position]];
-    float2 texCoord;
-} ColorInOut;
-
-vertex ColorInOut vertexShader(Vertex in [[stage_in]],
-                               constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]])
-{
-    ColorInOut out;
-
-    float4 position = float4(in.position, 1.0);
-    out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
-    out.texCoord = in.texCoord;
-
+    VOut out;
+    out.pos = u.projectionMatrix * u.modelViewMatrix * float4(vin.pos, 1);
     return out;
 }
 
-fragment float4 fragmentShader(ColorInOut in [[stage_in]],
-                               constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               texture2d<half> colorMap     [[ texture(TextureIndexColor) ]])
+fragment float4 fragmentShader(constant Uniforms& u [[buffer(2)]])
 {
-    constexpr sampler colorSampler(mip_filter::linear,
-                                   mag_filter::linear,
-                                   min_filter::linear);
-
-    half4 colorSample   = colorMap.sample(colorSampler, in.texCoord.xy);
-
-    return float4(colorSample);
+    return u.color;
 }
