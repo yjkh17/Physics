@@ -1,0 +1,8 @@
+# Xcode build artifacts
+build/
+DerivedData/
+
+# Xcode user-specific data
+*.xcuserdata
+xcuserdata/
+*.xcuserdatad
