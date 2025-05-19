@@ -239,7 +239,31 @@ final class Renderer: NSObject, MTKViewDelegate {
     
     // MARK: ‑ Logic
     private func updateGame(dt: Float) {
-        // Movement & muscle simulation temporarily disabled – keep the skeleton static.
-        return
+        // Map held keys to muscle contractions.  We use the arrow keys to
+        // control the quadriceps/hamstrings of each leg.
+        let upArrow: UInt16    = 0x7E
+        let downArrow: UInt16  = 0x7D
+        let leftArrow: UInt16  = 0x7B
+        let rightArrow: UInt16 = 0x7C
+
+        let contractQuad  = keysHeld.contains(upArrow)
+        let contractHam   = keysHeld.contains(downArrow)
+        let contractQuadR = keysHeld.contains(rightArrow)
+        let contractHamR  = keysHeld.contains(leftArrow)
+
+        // Update dynamic rest lengths based on input
+        skel.applyUserInput(contractQuad: contractQuad,
+                            contractHam: contractHam,
+                            contractQuadR: contractQuadR,
+                            contractHamR: contractHamR,
+                            dt: dt)
+
+        // Advance the simulation with the current parameters
+        skel.step(dt: dt,
+                 groundY: groundY,
+                 applyFriction: keysHeld.isEmpty,
+                 muscleScale: muscleScale,
+                 gravityScale: gravityScale,
+                 damping: damping)
     }
 }
