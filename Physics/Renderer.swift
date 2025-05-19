@@ -239,8 +239,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     
     // MARK: ‑ Logic
     private func updateGame(dt: Float) {
-        // Map held keys to muscle contractions.  We use the arrow keys to
-        // control the quadriceps/hamstrings of each leg.
+        // Map currently held keys to muscle contractions.  Arrow keys control
+        // the quadriceps/hamstrings of each leg.
         let upArrow: UInt16    = 0x7E
         let downArrow: UInt16  = 0x7D
         let leftArrow: UInt16  = 0x7B
