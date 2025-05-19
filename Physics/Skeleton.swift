@@ -37,10 +37,10 @@ final class Skeleton {
     var muscles : [Muscle]
     fileprivate var joints  : [Joint]
 
-    // convenience factory: two mirrored legs hanging from a fixed pelvis
+    // convenience factory: simple biped starting above the ground
     static func twoLegs() -> Skeleton {
         // ── Key reference points ───────────────────────────────
-        let pelvis   = SIMD2<Float>(0, 4.0)        // body origin (fixed)
+        let pelvis   = SIMD2<Float>(0, 4.0)        // initial body origin
         let spineLen : Float = 2.0                 // pelvis → chest
         let legSeg   : Float = 2.0                 // thigh / shin
         let armSeg   : Float = 1.4                 // shorter upper / lower arm
@@ -212,15 +212,8 @@ extension Skeleton {
               gravityScale: Float = 1.0,
               damping: Float = 0.98) {
 
-        // ── Zero-velocity anchor for pelvis ───────────────────
-        let pelvis = SIMD2<Float>(0, 4.0)
-        bones[0].pA = pelvis;  bones[0].prevPA = pelvis          // left thigh root
-        if bones.count > 2 {
-            bones[2].pA = pelvis;  bones[2].prevPA = pelvis      // right thigh root
-        }
-        if bones.count > 4 {
-            bones[4].pA = pelvis;  bones[4].prevPA = pelvis      // spine root
-        }
+        // Skeleton now fully dynamic – pelvis no longer anchored
+        let anchoredRoots: Set<Int> = []
 
         // ── Verlet prediction ──────────────────────────────────
         // gravity (simpler form avoids operator-overload ambiguity)
@@ -257,9 +250,8 @@ extension Skeleton {
             let curLen = length(b.pB - b.pA)
             if curLen != 0 {
                 let n = (b.pB - b.pA) / curLen
-                let anchoredRoots: Set<Int> = [0, 2, 4]
                 if anchoredRoots.contains(i) {
-                    // root joint fixed at pelvis — move only the distal end
+                    // would fix the root joint if any bone were anchored
                     b.pB = b.pA + n * b.rest
                 } else {
                     // adjust both ends around their midpoint to restore rest length
@@ -278,11 +270,10 @@ extension Skeleton {
             bones[i] = b
         }
 
-        // pelvis already fixed & zero-velocity above
+        // pelvis no longer anchored
 
         // ── Constraint solver ─────────────────────────────────
-        // The three bones whose A‑joint is the pelvis are permanently anchored
-        let anchoredRoots: Set<Int> = [0, 2, 4]   // femurL root, femurR root, spine root
+        // With no fixed anchor points the whole body is free to fall
         for _ in 0..<15 {     // more iterations → better stability
 
             // bone length constraints
@@ -295,7 +286,7 @@ extension Skeleton {
                 let err = len - b.rest
 
                 if anchoredRoots.contains(i) {
-                    // Root joint (pelvis) is fixed – move only the distal end
+                    // move only the distal end when a root is anchored
                     b.pB += n * (-err)
                 } else {
                     // Distribute correction equally when both ends are free
@@ -313,7 +304,7 @@ extension Skeleton {
                 let pb = jnt.bIsA ? bj.pA : bj.pB
                 var centre = 0.5 * (pa + pb)
 
-                // If either endpoint is the anchored pelvis, lock the centre to that anchor
+                // If either endpoint is anchored, lock the centre to that anchor
                 if anchoredRoots.contains(jnt.i) && jnt.aIsA ||
                    anchoredRoots.contains(jnt.j) && jnt.bIsA {
                     centre = anchoredRoots.contains(jnt.i) && jnt.aIsA ? pa : pb
@@ -334,10 +325,7 @@ extension Skeleton {
                 bones[jnt.j] = bj
             }
 
-            // Re‑anchor the pelvis so it never drifts
-            bones[0].pA = pelvis      // left thigh root
-            bones[2].pA = pelvis      // right thigh root
-            bones[4].pA = pelvis      // spine root
+
 
             // muscle constraints
             for m in muscles {
@@ -381,10 +369,7 @@ extension Skeleton {
                 bones[m.j] = bj
             }
 
-            // Keep pelvis fixed after muscle corrections
-            bones[0].pA = pelvis      // left thigh root
-            bones[2].pA = pelvis      // right thigh root
-            bones[4].pA = pelvis      // spine root
+
 
             // ── ground constraints  ───────────────
             // keep both feet (shin endpoints) above the ground plane
