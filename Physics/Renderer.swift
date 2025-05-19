@@ -4,6 +4,7 @@
 //
 import MetalKit
 import simd
+import Foundation
 
 // MARK: ‑ Shared types
 private struct SimpleVertex {
@@ -40,7 +41,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var lastTime : CFTimeInterval = 0
     private var debugFrames = 0   // print first 120 frames
     
-    private let groundY   : Float = 0.0          // y‑position of the ground plane
+    private let groundY   : Float = Config.groundY          // y‑position of the ground plane
     private var skel = Skeleton.twoLegs()
     var paused = false
     var timeScale: Float = 1.0
