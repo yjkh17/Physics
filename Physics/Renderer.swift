@@ -29,9 +29,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let boneVB       : MTLBuffer    // unit quad for limbs
     
     // ── Input / physics state ─────────────────────────────────────
-    var muscleScale: Float = 0.5   // live-tunable from UI
-    var gravityScale: Float = 1.0      // live-tunable from UI
-    var damping: Float = 0.98        // live‑tunable from UI
+    // Fixed simulation parameters (sliders removed)
+    var muscleScale: Float = 0.0
+    var gravityScale: Float = 1.0
+    var damping: Float = 0.98
     var debugEnabled = false       // toggled by “D”
     /// Toggle drawing the yellow muscles.  Disabled while we’re working on the skeleton.
     var showMuscles = false
@@ -39,7 +40,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var lastTime : CFTimeInterval = 0
     private var debugFrames = 0   // print first 120 frames
     
-    private let groundY   : Float = -8.9         // top edge of the ground quad near bottom of view.
+    private let groundY   : Float = 0.0          // y‑position of the ground plane
     private var skel = Skeleton.twoLegs()
     var paused = false
     var timeScale: Float = 1.0
@@ -239,24 +240,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     
     // MARK: ‑ Logic
     private func updateGame(dt: Float) {
-        // Map currently held keys to muscle contractions.  Arrow keys control
-        // the quadriceps/hamstrings of each leg.
-        let upArrow: UInt16    = 0x7E
-        let downArrow: UInt16  = 0x7D
-        let leftArrow: UInt16  = 0x7B
-        let rightArrow: UInt16 = 0x7C
-
-        let contractQuad  = keysHeld.contains(upArrow)
-        let contractHam   = keysHeld.contains(downArrow)
-        let contractQuadR = keysHeld.contains(rightArrow)
-        let contractHamR  = keysHeld.contains(leftArrow)
-
-        // Update dynamic rest lengths based on input
-        skel.applyUserInput(contractQuad: contractQuad,
-                            contractHam: contractHam,
-                            contractQuadR: contractQuadR,
-                            contractHamR: contractHamR,
-                            dt: dt)
+        // Muscle input temporarily disabled
 
         // Advance the simulation with the current parameters
         skel.step(dt: dt,

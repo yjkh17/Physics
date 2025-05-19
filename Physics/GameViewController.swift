@@ -15,10 +15,6 @@ class GameViewController: NSViewController {
     var mtkView: MTKView!
     private var pauseBtn: NSButton!
     private var resetBtn: NSButton!
-    private var speedSlider: NSSlider!
-    private var muscleSlider: NSSlider!
-    private var gravitySlider: NSSlider!
-    private var dampingSlider: NSSlider!
     
     private var keysHeld = Set<UInt16>()
     
@@ -58,49 +54,6 @@ class GameViewController: NSViewController {
         pauseBtn = makeButton(title: "Pause",  action: #selector(togglePause), x: 10)
         resetBtn = makeButton(title: "Reset",  action: #selector(doReset),    x: 100)
         
-        speedSlider = NSSlider(value: 1.0,
-                               minValue: 0.1,
-                               maxValue: 2.0,
-                               target: self,
-                               action: #selector(speedChanged))
-        speedSlider.frame = CGRect(x: 200, y: view.bounds.height - 30,
-                                   width: 150, height: 20)
-        speedSlider.isContinuous = true
-        speedSlider.autoresizingMask = [.minYMargin, .maxXMargin]
-        view.addSubview(speedSlider)
-
-        muscleSlider = NSSlider(value: 0.5,
-                                minValue: 0.1,
-                                maxValue: 1.0,
-                                target: self,
-                                action: #selector(muscleChanged))
-        muscleSlider.frame = CGRect(x: 370, y: view.bounds.height - 30,
-                                    width: 150, height: 20)
-        muscleSlider.isContinuous = true
-        muscleSlider.autoresizingMask = [.minYMargin, .maxXMargin]
-        view.addSubview(muscleSlider)
-
-        gravitySlider = NSSlider(value: 1.0,
-                                 minValue: 0.1,
-                                 maxValue: 2.0,
-                                 target: self,
-                                 action: #selector(gravityChanged))
-        gravitySlider.frame = CGRect(x: 540, y: view.bounds.height - 30,
-                                     width: 150, height: 20)
-        gravitySlider.isContinuous = true
-        gravitySlider.autoresizingMask = [.minYMargin, .maxXMargin]
-        view.addSubview(gravitySlider)
-
-        dampingSlider = NSSlider(value: 0.98,
-                                 minValue: 0.90,
-                                 maxValue: 1.0,
-                                 target: self,
-                                 action: #selector(dampingChanged))
-        dampingSlider.frame = CGRect(x: 710, y: view.bounds.height - 30,
-                                     width: 150, height: 20)
-        dampingSlider.isContinuous = true
-        dampingSlider.autoresizingMask = [.minYMargin, .maxXMargin]
-        view.addSubview(dampingSlider)
     }
     
     // REPLACE: keyDown / keyUp to update set & forward to renderer
@@ -133,20 +86,4 @@ class GameViewController: NSViewController {
         renderer.resetSkeleton()
     }
     
-    // MARK: - Slider
-    @objc private func speedChanged() {
-        renderer.timeScale = Float(speedSlider.doubleValue)
-    }
-
-    @objc private func muscleChanged() {
-        renderer.muscleScale = Float(muscleSlider.doubleValue)
-    }
-
-    @objc private func gravityChanged() {
-        renderer.gravityScale = Float(gravitySlider.doubleValue)
-    }
-
-    @objc private func dampingChanged() {
-        renderer.damping = Float(dampingSlider.doubleValue)
-    }
 }
