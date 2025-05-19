@@ -11,7 +11,12 @@ A lightweight Metal-based macOS playground that demonstrates a simple 2‑D ragd
 
 - **Arrow Keys** – contract quadriceps/hamstrings on the left and right legs.
 - **D** – toggle debug logging of bone positions.
+- **M** – toggle display of muscles.
+- **+ / -** – adjust simulation speed.
 - **Pause** – pause or resume the simulation.
 - **Reset** – restore the skeleton to the initial pose.
 
 The application starts with a simple two‑legged skeleton standing on a ground plane. Use the controls to explore how the muscles and constraints interact.
+
+## Development
+Run `scripts/format.sh` before committing to ensure consistent style.

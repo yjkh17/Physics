@@ -58,14 +58,24 @@ class GameViewController: NSViewController {
     
     // REPLACE: keyDown / keyUp to update set & forward to renderer
     override func keyDown(with event: NSEvent) {
-        // toggle debug printout
-        if event.charactersIgnoringModifiers?.lowercased() == "d" {
-            renderer.debugEnabled.toggle()
-            return
+        if let char = event.charactersIgnoringModifiers?.lowercased() {
+            if char == "d" {
+                renderer.debugEnabled.toggle()
+                return
+            } else if char == "m" {
+                renderer.showMuscles.toggle()
+                return
+            } else if char == "+" || char == "=" {
+                renderer.timeScale = min(renderer.timeScale + 0.25, 4.0)
+                return
+            } else if char == "-" {
+                renderer.timeScale = max(renderer.timeScale - 0.25, 0.25)
+                return
+            }
         }
-        
+
         keysHeld.insert(event.keyCode)
-        renderer.keysHeld = keysHeld          // forward
+        renderer.keysHeld = keysHeld
     }
     
     override func keyUp(with event: NSEvent) {

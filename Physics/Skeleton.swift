@@ -6,6 +6,7 @@
 //
 
 import simd
+import Foundation
 
 // MARK: - Joint helper type
 fileprivate struct Joint {
@@ -221,7 +222,7 @@ extension Skeleton {
         // -------- Safety guard -------------------------------------------------
         // Keep every joint inside a finite “sandbox” so the math can never blow up
         // (large values were triggering numeric overflows → abort()).
-        let posLimit: Float = 15        // keep every joint safely within view
+        let posLimit: Float = Config.positionLimit        // keep every joint safely within view
         guard gVec.x.isFinite && gVec.y.isFinite else { return }
 
         for i in bones.indices {
@@ -229,7 +230,7 @@ extension Skeleton {
             let vA0 = (b.pA - b.prevPA) * damping
             let vB0 = (b.pB - b.prevPB) * damping
             // clamp velocity magnitudes (≤ 25 m/s) to prevent numeric blow‑ups
-            let maxVel: Float = 25 * dt          // distance allowed this step
+            let maxVel: Float = Config.maxVelocity * dt          // distance allowed this step
             var vA = vA0, vB = vB0               // make mutable
             let lenA = length(vA)
             if lenA > maxVel { vA *= maxVel / lenA }
@@ -274,7 +275,7 @@ extension Skeleton {
 
         // ── Constraint solver ─────────────────────────────────
         // With no fixed anchor points the whole body is free to fall
-        for _ in 0..<15 {     // more iterations → better stability
+        for _ in 0..<Config.solverIterations {     // more iterations → better stability
 
             // bone length constraints
             for i in bones.indices {
