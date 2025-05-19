@@ -44,10 +44,8 @@ class GameViewController: NSViewController {
         }
         
         renderer = newRenderer
-        
+
         renderer.mtkView(mtkView, drawableSizeWillChange: mtkView.drawableSize)
-        
-        renderer = newRenderer
         mtkView.delegate = renderer
         
         func makeButton(title: String, action: Selector, x: CGFloat) -> NSButton {
