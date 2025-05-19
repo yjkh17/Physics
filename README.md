@@ -13,9 +13,5 @@ A lightweight Metal-based macOS playground that demonstrates a simple 2‑D ragd
 - **D** – toggle debug logging of bone positions.
 - **Pause** – pause or resume the simulation.
 - **Reset** – restore the skeleton to the initial pose.
-- **Speed Slider** – adjust simulation speed.
-- **Muscle Slider** – scale muscle contraction strength.
-- **Gravity Slider** – scale gravity strength.
-- **Damping Slider** – adjust damping applied to velocity.
 
 The application starts with a simple two‑legged skeleton standing on a ground plane. Use the controls to explore how the muscles and constraints interact.

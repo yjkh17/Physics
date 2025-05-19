@@ -40,7 +40,7 @@ final class Skeleton {
     // convenience factory: two mirrored legs hanging from a fixed pelvis
     static func twoLegs() -> Skeleton {
         // ── Key reference points ───────────────────────────────
-        let pelvis   = SIMD2<Float>(0, 0.5)        // body origin (fixed)
+        let pelvis   = SIMD2<Float>(0, 4.0)        // body origin (fixed)
         let spineLen : Float = 2.0                 // pelvis → chest
         let legSeg   : Float = 2.0                 // thigh / shin
         let armSeg   : Float = 1.4                 // shorter upper / lower arm
@@ -213,7 +213,7 @@ extension Skeleton {
               damping: Float = 0.98) {
 
         // ── Zero-velocity anchor for pelvis ───────────────────
-        let pelvis = SIMD2<Float>(0, 0.5)
+        let pelvis = SIMD2<Float>(0, 4.0)
         bones[0].pA = pelvis;  bones[0].prevPA = pelvis          // left thigh root
         if bones.count > 2 {
             bones[2].pA = pelvis;  bones[2].prevPA = pelvis      // right thigh root
